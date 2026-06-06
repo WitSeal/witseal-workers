@@ -1,0 +1,21 @@
+{
+  // WitSeal execution receipts for Cloudflare Workers — demo Worker config.
+  //
+  // The Worker produces a canonical WitSeal v0.2 execution receipt in-isolate
+  // via WebCrypto (crypto.subtle: SHA-256 + standard Ed25519). No nodejs_compat
+  // flag is required — the receipt module is pure WebCrypto + Web standard APIs
+  // (TextEncoder, btoa/atob). Standard Ed25519 in WebCrypto is available on
+  // current Workers compatibility dates.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "witseal-workers",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-05",
+  "observability": {
+    "enabled": true
+  }
+
+  // Production signing key (DO NOT commit real key material):
+  //   npx wrangler secret put WITSEAL_SIGNING_SEED_HEX
+  // The demo falls back to the repo TEST-ONLY fixture seed when the secret is
+  // absent, so the local dev path runs with no secret configured.
+}
