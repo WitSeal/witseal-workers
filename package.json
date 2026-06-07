@@ -1,8 +1,15 @@
 {
   "name": "witseal-workers",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "WitSeal v0.2 execution receipts produced in-isolate on Cloudflare Workers via WebCrypto, verifiable by the unmodified Node witseal CLI.",
+  "license": "Apache-2.0",
+  "author": "WitSeal Maintainers",
+  "homepage": "https://github.com/WitSeal/witseal-workers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WitSeal/witseal-workers.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

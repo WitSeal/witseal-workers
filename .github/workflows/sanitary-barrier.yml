@@ -1,0 +1,47 @@
+# Sanitary barrier — CI gate for the public witseal-workers repository.
+#
+# Active gate. Fails any pull request or push to `main` that introduces:
+#   - Cyrillic (U+0400-U+04FF) anywhere in tracked files, or
+#   - an internal operational marker (paths / roles / artifacts / provenance codes).
+#
+# The denylist pattern is an ERE held in the repository variable `SANITARY_DENYLIST`,
+# kept out of this file so the public workflow does not itself carry the markers it
+# blocks. Set it under: Settings -> Secrets and variables -> Actions -> Variables.
+# Public `ADR-NNNN`, `RFC-NNNN`, and IETF references are not matched by the pattern.
+# This workflow scans all tracked files, including itself.
+name: Sanitary barrier
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+jobs:
+  sanitary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: No Cyrillic in tracked files
+        run: |
+          set -euo pipefail
+          # GNU grep -P on ubuntu supports \x{...} code-point ranges.
+          if git ls-files -z \
+            | xargs -0 grep -lIP '[\x{0400}-\x{04FF}]' 2>/dev/null; then
+            echo "::error::Cyrillic found in tracked files (see paths above)"
+            exit 1
+          fi
+          echo "No Cyrillic. OK."
+      - name: Denylist (internal operational markers)
+        env:
+          PAT: ${{ vars.SANITARY_DENYLIST }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PAT}" ]; then
+            echo "::error::SANITARY_DENYLIST repository variable is not set — the denylist gate cannot run (fail-closed)"
+            exit 1
+          fi
+          if git ls-files -z \
+            | xargs -0 grep -lIE "${PAT}" 2>/dev/null; then
+            echo "::error::Denylist marker found in tracked files (see paths above)"
+            exit 1
+          fi
+          echo "No denylist markers. OK."
