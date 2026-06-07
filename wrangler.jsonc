@@ -12,7 +12,13 @@
   "compatibility_date": "2026-06-05",
   "observability": {
     "enabled": true
-  }
+  },
+
+  // Custom domain for the public demo — requires the witseal.com zone on this
+  // Cloudflare account; wrangler provisions the hostname and TLS on deploy.
+  "routes": [
+    { "pattern": "receipts.witseal.com", "custom_domain": true }
+  ]
 
   // Production signing key (DO NOT commit real key material):
   //   npx wrangler secret put WITSEAL_SIGNING_SEED_HEX
