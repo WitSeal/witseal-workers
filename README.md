@@ -3,6 +3,27 @@
 WitSeal **v0.2 execution receipts produced inside a Cloudflare Workers isolate**,
 verifiable byte-for-byte by the unmodified Node `witseal` CLI.
 
+## Try it live
+
+The demo is deployed at **<https://receipts.witseal.com>**. Produce a receipt and
+verify it offline with the **published** CLI — no local checkout, no trust in us:
+
+```sh
+# 1. Ask the isolate to witness a SHA-256 over your payload and emit the receipt.
+printf 'hello from anywhere' \
+  | curl -s -X POST https://receipts.witseal.com/receipt --data-binary @- > receipt.json
+
+# 2. Fetch the public key the isolate signs with.
+PUB=$(curl -s https://receipts.witseal.com/pubkey)
+
+# 3. Verify with the unmodified, published witseal CLI.
+npx -y -p @witseal/cli@0.4.0 witseal verify receipt.json --public-key "$PUB"
+# witseal: VALID ✓ (receipt.v0.2)
+```
+
+The receipt is produced in a Cloudflare Workers isolate and verifies under the
+unmodified Node verifier — you trust the math, not the host.
+
 ## Why this exists
 
 A Cloudflare Worker runs in a V8 isolate. There is **no** `child_process`, **no**
