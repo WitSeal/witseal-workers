@@ -3,27 +3,6 @@
 WitSeal **v0.2 execution receipts produced inside a Cloudflare Workers isolate**,
 verifiable byte-for-byte by the unmodified Node `witseal` CLI.
 
-## Try it live
-
-The demo is deployed at **<https://receipts.witseal.com>**. Produce a receipt and
-verify it offline with the **published** CLI — no local checkout, no trust in us:
-
-```sh
-# 1. Ask the isolate to witness a SHA-256 over your payload and emit the receipt.
-printf 'hello from anywhere' \
-  | curl -s -X POST https://receipts.witseal.com/receipt --data-binary @- > receipt.json
-
-# 2. Fetch the public key the isolate signs with.
-PUB=$(curl -s https://receipts.witseal.com/pubkey)
-
-# 3. Verify with the unmodified, published witseal CLI.
-npx -y -p @witseal/cli@0.4.0 witseal verify receipt.json --public-key "$PUB"
-# witseal: VALID ✓ (receipt.v0.2)
-```
-
-The receipt is produced in a Cloudflare Workers isolate and verifies under the
-unmodified Node verifier — you trust the math, not the host.
-
 ## Why this exists
 
 A Cloudflare Worker runs in a V8 isolate. There is **no** `child_process`, **no**
@@ -115,6 +94,52 @@ Workers isolate, so it is a faithful stand-in for the in-isolate path:
 ```sh
 npm run verify-demo   # writes /tmp/worker-receipt.json + /tmp/worker-pubkey.hex
 ```
+
+## Build provenance (L4)
+
+The Worker now carries its **real build provenance** in every receipt it emits.
+The v0.2 receipt already has the build-provenance fields — `git_commit`,
+`artifact_digest`, `attestation_digest`, `build_id`, `artifact_type` (they are
+mandatory in v0.2 and present in the golden) — so this fills them with **real**
+values instead of the inline sentinels the demo used to hard-code. **No schema,
+canon, or golden change**: only the field *values* go from placeholders to real
+build context, and `artifact_type` stays the existing `generic-binary` taxonomy
+value.
+
+| Receipt field        | Real value (L4)                                                    |
+| -------------------- | ------------------------------------------------------------------ |
+| `git_commit`         | `GITHUB_SHA` or `git rev-parse HEAD` — the real 40-hex source commit |
+| `artifact_digest`    | `sha256:` of the built Worker bundle                               |
+| `attestation_digest` | `sha256:` of a **DSSE in-toto** attestation of that bundle (Ed25519) |
+| `build_id`           | `GITHUB_RUN_ID` in CI, else `wrangler@<version>` locally           |
+| `artifact_type`      | `generic-binary` (existing taxonomy value)                         |
+
+How it is wired:
+
+- [`scripts/gen-provenance.mjs`](scripts/gen-provenance.mjs) runs at build time
+  (in a git context). It resolves the git commit, builds the Worker bundle
+  (`wrangler deploy --dry-run --outdir`), hashes it, generates and signs a
+  **DSSE (in-toto / SLSA-provenance) attestation** of the bundle with Ed25519
+  over the DSSE `PAE` pre-authentication encoding (the same algorithm family as
+  `witseal sign-v0.2`), hashes that attestation, and writes
+  [`src/provenance.gen.ts`](src/provenance.gen.ts).
+- [`src/provenance.gen.ts`](src/provenance.gen.ts) is a **generated** module
+  (committed with placeholder/dev values + a "GENERATED — do not edit" header)
+  exporting a typed `BUILD_PROVENANCE`.
+- [`src/index-receipt-factory.ts`](src/index-receipt-factory.ts) reads
+  `BUILD_PROVENANCE` from that module instead of inline sentinels.
+
+```sh
+npm run gen-provenance     # writes src/provenance.gen.ts from real build context
+                           # (also runs automatically as the `deploy` predeploy step)
+```
+
+The DSSE attestation is emitted next to the bundle
+(`provenance.intoto.dsse.json`) for the operator to publish. **Producing the
+real provenance is in-build; the attested deploy itself (uploading the
+attestation alongside the Worker) is the operator action** — the demo signs the
+attestation with a clearly-labelled **DEV-ONLY** key unless
+`WITSEAL_ATTESTATION_SEED_HEX` is provided.
 
 ## Signing key
 

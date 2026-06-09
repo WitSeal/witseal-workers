@@ -13,9 +13,12 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "gen-provenance": "node scripts/gen-provenance.mjs",
+    "predeploy": "node scripts/gen-provenance.mjs",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "verify-demo": "tsx harness/produce-receipt.ts"
+    "verify-demo": "tsx harness/produce-receipt.ts",
+    "verify-demo-provenance": "tsx harness/produce-receipt-provenance.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260606.1",

@@ -24,6 +24,33 @@ schema, the 17-field canon, the golden vector, or the v0.2 pre-image rule.
 | Negative controls (tamper detection) | Yes — tampering any witnessed field or the hash/signature → `INVALID` |
 | Golden vector unchanged | Yes — still 1050 bytes, SHA-256 `8fc29592…ef1b` |
 | Receipt schema / version unchanged | Yes — `witseal.receipt.v0.2`, no new version, no schema edit |
+| **Real build provenance (L4) in the receipt** | **Yes — `git_commit` is the real source commit (≠ sentinel zeros); `artifact_digest` = sha256 of the built bundle; `attestation_digest` = sha256 of a DSSE in-toto attestation of that bundle; `build_id` = run id / `wrangler@<ver>`; `artifact_type` = existing `generic-binary`** |
+| DSSE in-toto attestation of the bundle (Ed25519, offline) | Yes — `payloadType=application/vnd.in-toto+json`, SLSA-provenance predicate, signed over the DSSE `PAE`; independently verifies with `crypto.verify` |
+
+## Build provenance (L4)
+
+The Worker carries its **real build provenance** in each receipt. The v0.2
+receipt's build-provenance fields **already exist** (mandatory; present in the
+golden with sentinel values). This work fills them with real values via a
+generated module — it does **not** change the schema, the 17-field canon, or the
+golden vector. `artifact_type` stays the existing `generic-binary` taxonomy
+value (no new literal).
+
+- `scripts/gen-provenance.mjs` (build-time, git context): `git_commit` =
+  `GITHUB_SHA` / `git rev-parse HEAD`; builds the Worker bundle
+  (`wrangler deploy --dry-run --outdir`) and sets `artifact_digest` =
+  `sha256:` of the bundle; generates a **DSSE in-toto** attestation of the
+  bundle, signed with Ed25519 over the DSSE `PAE`, and sets `attestation_digest`
+  = `sha256:` of that attestation envelope; `build_id` = `GITHUB_RUN_ID` or
+  `wrangler@<version>`. It writes `src/provenance.gen.ts`.
+- `src/provenance.gen.ts` (GENERATED) exports a typed `BUILD_PROVENANCE`.
+- `src/index-receipt-factory.ts` reads `BUILD_PROVENANCE` instead of inline
+  sentinels.
+
+**Producing the real provenance is in-build; the attested deploy itself
+(publishing the DSSE attestation alongside the uploaded Worker) is the operator
+action.** The demo signs the attestation with a clearly-labelled DEV-ONLY key
+unless `WITSEAL_ATTESTATION_SEED_HEX` is set.
 
 ## What is NOT covered (scope boundary / honesty ceiling)
 
@@ -61,6 +88,55 @@ $ node <witseal>/dist/src/cli/index.js verify /tmp/worker-receipt.json \
 witseal: VALID ✓ (receipt.v0.2)
          file:    /tmp/worker-receipt.json
 exit=0
+```
+
+### Build-provenance live-verify (L4) — real (non-sentinel) provenance
+
+`scripts/gen-provenance.mjs` was run in a git context: it built the Worker
+bundle, hashed it, generated + signed a DSSE in-toto attestation, and wrote
+`src/provenance.gen.ts` with **real** values. A receipt produced from those
+values verifies under the **unmodified** `witseal verify`.
+
+```
+$ node scripts/gen-provenance.mjs
+attestation written: …/provenance.intoto.dsse.json
+provenance written: …/src/provenance.gen.ts
+  gitCommit         : 5df00d56cb1b0d2f8c2aaff8e5bbb8820a811f3c
+  artifactDigest    : sha256:f5c60abaad411ac060fd456d304f12254f390c46535c02101d09908fac03e6c5
+  attestationDigest : sha256:0acbebb434e72f4fe292b8b905e30d6ac69d25b919d83de40bfe6ebbfd9a47f6
+  buildId           : wrangler@4.98.0
+  artifactType      : generic-binary
+
+$ tsx harness/produce-receipt-provenance.ts /tmp/worker-receipt-provenance.json /tmp/worker-pubkey.hex
+git_commit        : 5df00d56cb1b0d2f8c2aaff8e5bbb8820a811f3c   # ≠ sentinel zeros
+artifact_digest   : sha256:f5c60abaad411ac060fd456d304f12254f390c46535c02101d09908fac03e6c5
+attestation_digest: sha256:0acbebb434e72f4fe292b8b905e30d6ac69d25b919d83de40bfe6ebbfd9a47f6
+build_id          : wrangler@4.98.0
+artifact_type     : generic-binary
+
+$ node <witseal>/dist/src/cli/index.js verify /tmp/worker-receipt-provenance.json \
+      --public-key fd62f46e4e64333ef4c0693e9caf52a540cb21a3546547f016bcd0e990c91862
+witseal: VALID ✓ (receipt.v0.2)
+         file:    /tmp/worker-receipt-provenance.json
+exit=0
+```
+
+Provenance is **bound** (not vacuous): flipping `git_commit` to a different valid
+40-hex value makes the verifier reject the receipt —
+
+```
+witseal: INVALID ✗ (receipt.v0.2)
+         reason: ed25519 signature verification failed
+exit=1
+```
+
+The DSSE in-toto attestation is itself well-formed and verifies offline:
+
+```
+bundle sha256       : f5c60aba…fac03e6c5
+statement subject   : sha256:f5c60aba…fac03e6c5
+subject == bundle   : true
+DSSE PAE sig VERIFY : VALID (Ed25519 over PAE)
 ```
 
 ### In-isolate evidence (real Workers runtime via `wrangler dev` / workerd)
@@ -110,20 +186,24 @@ receipt contents — the VALID result is not vacuous.
 ### Golden vector unchanged
 
 ```
-$ node -e '… canonicalize(rust-golden.json) …'
-golden bytes: 1050 sha256: 8fc29592fd3317e48caccc9b5c64d01cfa32d5e27846c50f233829e1bb17ef1b
+$ shasum -a 256 <witseal>/tests/fixtures/golden-receipt/rust-golden.canonical
+8fc29592fd3317e48caccc9b5c64d01cfa32d5e27846c50f233829e1bb17ef1b  rust-golden.canonical
+$ wc -c < <witseal>/tests/fixtures/golden-receipt/rust-golden.canonical
+1050
 ```
 
 The canonical golden receipt remains 1050 bytes with the same SHA-256. This work
-re-implements the sign/hash **primitives** on WebCrypto over byte-identical
-canonical bytes; it does **not** touch the schema or the golden vector.
+fills the build-provenance field VALUES from real build context; it does **not**
+touch the schema or the golden vector.
 
 ## Notes
 
 - Public key passed to the verifier is the raw 32-byte Ed25519 public key as
   64-char hex (`fd62f46e…91862`), derived in-isolate from the seed and served at
   `GET /pubkey`.
-- The receipt module is type-clean under `@cloudflare/workers-types`
-  (`tsc --noEmit`, no errors).
+- The Worker source (`src/**`, incl. `provenance.gen.ts` + `index-receipt-factory.ts`)
+  is type-clean under `@cloudflare/workers-types` (`tsc --noEmit`, no errors).
 - The signing seed in the demo is the WitSeal repo **TEST-ONLY** fixture seed;
-  production uses a Workers secret (`WITSEAL_SIGNING_SEED_HEX`).
+  production uses a Workers secret (`WITSEAL_SIGNING_SEED_HEX`). The DSSE build
+  attestation uses a separate **DEV-ONLY** key unless
+  `WITSEAL_ATTESTATION_SEED_HEX` is set.
