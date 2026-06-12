@@ -184,6 +184,32 @@ npx wrangler secret put WITSEAL_SIGNING_SEED_HEX   # 64 hex chars (32-byte Ed255
 When the secret is absent (local dev / demo) the fixture seed is used so the path
 runs with no configuration.
 
+## Attestation key (build-time) and key rotation
+
+There are **two independent keys**, with **two different homes**:
+
+| Key | Signs | Read | Home |
+| --- | ----- | ---- | ---- |
+| `WITSEAL_SIGNING_SEED_HEX` | the receipt (`/pubkey`) | **Worker runtime** | Cloudflare Workers **secret** (`wrangler secret put`) |
+| `WITSEAL_ATTESTATION_SEED_HEX` | the DSSE build attestation (`/attestation`) | **build time**, by `scripts/gen-provenance.mjs` | a **persistent operator secret outside the repo** (e.g. CI secret for CI builds; macOS Keychain / a `chmod 600` file outside the repo for manual builds) |
+
+`WITSEAL_ATTESTATION_SEED_HEX` is **not** a Workers runtime secret — `wrangler
+secret put` has no effect on it. The deploy must read it from its persistent home
+into the build environment, e.g.:
+
+```sh
+WITSEAL_ATTESTATION_SEED_HEX="$(security find-generic-password -s witseal-attestation-seed -w)" \
+  npm run deploy
+```
+
+**Key rotation is a deliberate operator act, never a deploy side-effect.** A
+deploy must reuse the stored seed so that `/attestation/pubkey` is stable across
+deploys; generating a fresh seed per deploy would silently rotate the builder key
+and orphan the attestations of every previously issued receipt. If
+`WITSEAL_ATTESTATION_SEED_HEX` is unset at build time, the attestation falls back
+to a clearly-labelled **DEV-ONLY** key (public, forgeable) — never a real
+release.
+
 ## Compatibility notes
 
 - Standard WebCrypto **Ed25519** (`{ name: "Ed25519" }`) is used — the modern

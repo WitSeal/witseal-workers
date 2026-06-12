@@ -60,6 +60,14 @@ now serves both the envelope and the builder key, the build-provenance loop is
 `witseal verify --check-provenance --attestation <…> --builder-key <…>` (see the
 README "Closing the provenance loop" section).
 
+`WITSEAL_ATTESTATION_SEED_HEX` is a **build-time** key (read by
+`gen-provenance.mjs`, not the Worker runtime — `wrangler secret put` does not
+apply to it). It is a **persistent** operator secret kept outside the repo; the
+deploy reuses it so `/attestation/pubkey` is stable across deploys. **Key
+rotation is a deliberate operator act, not a deploy side-effect** — a fresh seed
+per deploy would orphan the attestations of all previously issued receipts. See
+the README "Attestation key (build-time) and key rotation" section.
+
 ## What is NOT covered (scope boundary / honesty ceiling)
 
 The Worker witnesses **one isolate-native action its own handler performs and
