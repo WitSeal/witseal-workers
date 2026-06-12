@@ -20,10 +20,14 @@
  * isolates, or anything the handler does not itself perform.
  *
  * Routes:
- *   GET  /            — service banner + usage.
- *   GET  /pubkey      — the Ed25519 public key (hex) for `witseal verify`.
- *   POST /receipt     — perform the witnessed action over the request body and
- *                       return the signed v0.2 receipt JSON.
+ *   GET  /                   — service banner + usage.
+ *   GET  /pubkey             — the Ed25519 public key (hex) for `witseal verify`.
+ *   POST /receipt            — perform the witnessed action over the request body
+ *                              and return the signed v0.2 receipt JSON.
+ *   GET  /attestation        — the build's DSSE in-toto attestation envelope; its
+ *                              sha256 == `receipt.attestation_digest`.
+ *   GET  /attestation/pubkey — the builder (attestation) public key (hex), the
+ *                              trusted `--builder-key` for `--check-provenance`.
  *
  * Key handling: the demo derives its seed from the repo TEST-ONLY fixture seed.
  * A production Worker MUST load the seed from a Workers secret binding
@@ -31,6 +35,7 @@
  */
 import { buildDemoReceipt, TEST_SEED_HEX } from './index-receipt-factory.js';
 import { derivePublicKeyHex } from './witseal-receipt.js';
+import { BUILD_ATTESTATION } from './provenance.gen.js';
 
 export interface Env {
   /** OPTIONAL Workers secret: 64-char hex Ed25519 signing seed. When absent the
@@ -63,13 +68,21 @@ This Worker produces a canonical WitSeal v0.2 execution receipt in-isolate via
 WebCrypto, for an isolate-native action it owns (SHA-256 over the request body).
 The receipt verifies VALID under the unmodified Node \`witseal verify\`.
 
-  GET  /pubkey    -> Ed25519 public key (hex) for: witseal verify <file> --public-key <hex>
-  POST /receipt   -> signed v0.2 receipt JSON for the SHA-256 of the POST body
+  GET  /pubkey             -> Ed25519 public key (hex) for: witseal verify <file> --public-key <hex>
+  POST /receipt            -> signed v0.2 receipt JSON for the SHA-256 of the POST body
+  GET  /attestation        -> the build's DSSE in-toto attestation (sha256 == receipt.attestation_digest)
+  GET  /attestation/pubkey -> builder public key (hex): the trusted --builder-key for --check-provenance
 
 Verify a returned receipt:
   curl -s -X POST <worker-url>/receipt --data-binary @payload.bin > receipt.json
   curl -s <worker-url>/pubkey
   node dist/src/cli/index.js verify receipt.json --public-key <hex-from-/pubkey>
+
+Close the build-provenance loop (independent re-check of the attestation):
+  curl -s <worker-url>/attestation > attestation.json
+  curl -s <worker-url>/attestation/pubkey
+  node dist/src/cli/index.js verify receipt.json --public-key <hex-from-/pubkey> \\
+    --check-provenance --attestation attestation.json --builder-key <hex-from-/attestation/pubkey>
 `;
 
 export default {
@@ -85,6 +98,25 @@ export default {
     if (request.method === 'GET' && url.pathname === '/pubkey') {
       const pubHex = await derivePublicKeyHex(seedFrom(env));
       return new Response(pubHex + '\n', {
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
+
+    // The build's DSSE in-toto attestation, served VERBATIM. These exact bytes
+    // are the ones whose sha256 is baked into every receipt's
+    // `attestation_digest`, so a verifier binds them to the receipt byte-for-byte
+    // (`witseal verify --check-provenance --attestation <this>`).
+    if (request.method === 'GET' && url.pathname === '/attestation') {
+      return new Response(BUILD_ATTESTATION.envelope, {
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
+
+    // The builder (attestation) public key — the TRUSTED `--builder-key` that
+    // authenticates the DSSE signature. Served out-of-band from the envelope so a
+    // verifier need not trust the envelope's own self-asserted key.
+    if (request.method === 'GET' && url.pathname === '/attestation/pubkey') {
+      return new Response(BUILD_ATTESTATION.builderPublicKeyHex + '\n', {
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       });
     }
