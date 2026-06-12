@@ -238,11 +238,15 @@ function buildDsseAttestation({
   bundleSha256Hex,
   buildId,
   artifactType,
-  bundleSource,
   privateKey,
   publicKeyHex,
   keyDev,
 }) {
+  // NB: the statement is deterministic in (gitCommit, bundle sha256, buildId,
+  // artifactType) and the signing key — it carries NO volatile build-host paths.
+  // The bundle identity lives in `subject[0].digest.sha256`; a local bundle path
+  // would (a) leak a build-host filesystem path into a PUBLICLY-SERVED envelope
+  // and (b) make the attestation (and thus attestation_digest) non-reproducible.
   const statement = {
     _type: 'https://in-toto.io/Statement/v1',
     subject: [
@@ -268,7 +272,6 @@ function buildDsseAttestation({
       metadata: {
         buildInvocationId: buildId,
         artifactType,
-        bundleSubject: bundleSource,
       },
     },
   };
@@ -369,6 +372,29 @@ export const BUILD_PROVENANCE: BuildProvenance = {
   buildId: ${JSON.stringify(p.buildId)},
   artifactType: ${JSON.stringify(p.artifactType)},
 };
+
+/** The build's DSSE in-toto attestation, surfaced so the Worker can PUBLISH it
+ *  (GET /attestation, GET /attestation/pubkey) and a third party can close the
+ *  provenance loop with the unmodified \`witseal verify --check-provenance\`. */
+export interface BuildAttestation {
+  /** The EXACT DSSE in-toto envelope text. Its sha256 equals
+   *  \`BUILD_PROVENANCE.attestationDigest\` (== \`receipt.attestation_digest\`), so
+   *  serving these bytes verbatim lets a verifier bind the envelope to the
+   *  receipt byte-for-byte. Served at \`GET /attestation\`. */
+  readonly envelope: string;
+  /** The builder (attestation) Ed25519 public key, lowercase hex. This is the
+   *  TRUSTED \`--builder-key\` that authenticates the DSSE signature; the verifier
+   *  must take it from this trusted channel, NOT from the envelope's own
+   *  self-asserted \`publicKeyHex\`. Served at \`GET /attestation/pubkey\`. */
+  readonly builderPublicKeyHex: string;
+}
+
+/** This build's DSSE attestation envelope + the builder public key that signs
+ *  it, written by scripts/gen-provenance.mjs. */
+export const BUILD_ATTESTATION: BuildAttestation = {
+  envelope: ${JSON.stringify(p.attestationEnvelope)},
+  builderPublicKeyHex: ${JSON.stringify(p.builderPublicKeyHex)},
+};
 `;
 }
 
@@ -391,12 +417,15 @@ function main() {
     bundleSha256Hex,
     buildId,
     artifactType,
-    bundleSource,
     privateKey,
     publicKeyHex,
     keyDev: isDev,
   });
   const attestationDigest = `sha256:${sha256Hex(envelopeBytes)}`;
+  // The EXACT envelope text the Worker will serve at GET /attestation. Its
+  // sha256 is `attestationDigest` above (== receipt.attestation_digest), so a
+  // third party can bind the served envelope to the receipt byte-for-byte.
+  const attestationEnvelope = envelopeBytes.toString('utf8');
 
   // Persist the DSSE attestation next to the bundle for the operator's attested
   // deploy (the attested deploy itself is the operator action).
@@ -412,6 +441,8 @@ function main() {
     attestationDigest,
     buildId,
     artifactType,
+    attestationEnvelope,
+    builderPublicKeyHex: publicKeyHex,
   };
   writeFileSync(SRC_OUT, renderProvenanceTs(provenance), 'utf8');
 

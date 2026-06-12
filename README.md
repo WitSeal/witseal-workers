@@ -60,11 +60,13 @@ unchanged Node verifier.
 
 ## Routes
 
-| Method | Path        | Description                                                            |
-| ------ | ----------- | --------------------------------------------------------------------- |
-| `GET`  | `/`         | Service banner + usage.                                               |
-| `GET`  | `/pubkey`   | The Ed25519 public key (hex) for `witseal verify --public-key`.        |
-| `POST` | `/receipt`  | Perform the witnessed action over the POST body; return the signed receipt JSON. |
+| Method | Path                 | Description                                                            |
+| ------ | -------------------- | --------------------------------------------------------------------- |
+| `GET`  | `/`                  | Service banner + usage.                                               |
+| `GET`  | `/pubkey`            | The Ed25519 public key (hex) for `witseal verify --public-key`.        |
+| `POST` | `/receipt`           | Perform the witnessed action over the POST body; return the signed receipt JSON. |
+| `GET`  | `/attestation`       | The build's DSSE in-toto attestation, served verbatim; its `sha256` equals every receipt's `attestation_digest`. |
+| `GET`  | `/attestation/pubkey`| The builder (attestation) public key (hex): the trusted `--builder-key` for `witseal verify --check-provenance`. |
 
 ## Run locally
 
@@ -125,7 +127,8 @@ How it is wired:
   [`src/provenance.gen.ts`](src/provenance.gen.ts).
 - [`src/provenance.gen.ts`](src/provenance.gen.ts) is a **generated** module
   (committed with placeholder/dev values + a "GENERATED — do not edit" header)
-  exporting a typed `BUILD_PROVENANCE`.
+  exporting a typed `BUILD_PROVENANCE` and `BUILD_ATTESTATION` (the exact DSSE
+  envelope bytes + the builder public key).
 - [`src/index-receipt-factory.ts`](src/index-receipt-factory.ts) reads
   `BUILD_PROVENANCE` from that module instead of inline sentinels.
 
@@ -134,12 +137,37 @@ npm run gen-provenance     # writes src/provenance.gen.ts from real build contex
                            # (also runs automatically as the `deploy` predeploy step)
 ```
 
-The DSSE attestation is emitted next to the bundle
-(`provenance.intoto.dsse.json`) for the operator to publish. **Producing the
-real provenance is in-build; the attested deploy itself (uploading the
-attestation alongside the Worker) is the operator action** — the demo signs the
-attestation with a clearly-labelled **DEV-ONLY** key unless
-`WITSEAL_ATTESTATION_SEED_HEX` is provided.
+The DSSE attestation is signed with a clearly-labelled **DEV-ONLY** key unless
+`WITSEAL_ATTESTATION_SEED_HEX` is set in the build environment (export it for the
+real build — it is consumed at build time by `gen-provenance.mjs`, *not* a Worker
+runtime secret).
+
+### Closing the provenance loop (independent re-check)
+
+The Worker **publishes** the exact DSSE attestation envelope at `GET /attestation`
+and the builder public key at `GET /attestation/pubkey`, so any third party can
+re-check the build provenance with the **unmodified** `witseal verify
+--check-provenance` — no insider artifacts required:
+
+```sh
+BASE=https://receipts.witseal.com
+curl -s "$BASE/pubkey"                 > pub.hex
+curl -s "$BASE/attestation"            > attestation.json
+curl -s "$BASE/attestation/pubkey"     > builder.hex
+printf 'hello' | curl -s -X POST "$BASE/receipt" --data-binary @- > receipt.json
+
+node /path/to/witseal/dist/src/cli/index.js verify receipt.json \
+  --public-key "$(cat pub.hex)" \
+  --check-provenance --attestation attestation.json --builder-key "$(cat builder.hex)"
+# witseal: VALID ✓ (receipt.v0.2)
+# provenance: VALID (artifact ↔ attestation bound)
+```
+
+The served envelope is byte-identical to the bytes whose `sha256` is each
+receipt's `attestation_digest`, so `verify` pins the receipt to *this* exact
+attestation (any single-byte change → `attestation_digest mismatch`), then checks
+the DSSE Ed25519 signature under the builder key from the trusted
+`/attestation/pubkey` channel — **not** the envelope's own self-asserted key.
 
 ## Signing key
 

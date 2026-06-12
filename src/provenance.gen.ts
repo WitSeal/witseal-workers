@@ -60,9 +60,32 @@ export interface BuildProvenance {
  * that bundle; buildId is the CI run id or the local wrangler version.
  */
 export const BUILD_PROVENANCE: BuildProvenance = {
-  gitCommit: "4a29ca83b3ec633f1adc0bf129bc592819ef7235",
-  artifactDigest: "sha256:b8b8720be9bf43570f0564ce8ff3f53d79de16fd3658048ba6d067ebc3d45c7f",
-  attestationDigest: "sha256:af4ff5768d743635dbb6b61b51fcfda68eeb9479e0d52690f2ed14259616cba3",
+  gitCommit: "46325dfc951450c631e5dd85f4ad05a7dc32a34d",
+  artifactDigest: "sha256:25e60bd8082d49a91939fea207e5127c224f0f69592a528803ed09a15acf51da",
+  attestationDigest: "sha256:9f67fbd181274c17af0bd156b4999dccc33d66ff80451589d9280aefee68219e",
   buildId: "wrangler@4.98.0",
   artifactType: "generic-binary",
+};
+
+/** The build's DSSE in-toto attestation, surfaced so the Worker can PUBLISH it
+ *  (GET /attestation, GET /attestation/pubkey) and a third party can close the
+ *  provenance loop with the unmodified `witseal verify --check-provenance`. */
+export interface BuildAttestation {
+  /** The EXACT DSSE in-toto envelope text. Its sha256 equals
+   *  `BUILD_PROVENANCE.attestationDigest` (== `receipt.attestation_digest`), so
+   *  serving these bytes verbatim lets a verifier bind the envelope to the
+   *  receipt byte-for-byte. Served at `GET /attestation`. */
+  readonly envelope: string;
+  /** The builder (attestation) Ed25519 public key, lowercase hex. This is the
+   *  TRUSTED `--builder-key` that authenticates the DSSE signature; the verifier
+   *  must take it from this trusted channel, NOT from the envelope's own
+   *  self-asserted `publicKeyHex`. Served at `GET /attestation/pubkey`. */
+  readonly builderPublicKeyHex: string;
+}
+
+/** This build's DSSE attestation envelope + the builder public key that signs
+ *  it, written by scripts/gen-provenance.mjs. */
+export const BUILD_ATTESTATION: BuildAttestation = {
+  envelope: "{\n  \"payloadType\": \"application/vnd.in-toto+json\",\n  \"payload\": \"eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoid2l0c2VhbC13b3JrZXJzIiwiZGlnZXN0Ijp7InNoYTI1NiI6IjI1ZTYwYmQ4MDgyZDQ5YTkxOTM5ZmVhMjA3ZTUxMjdjMjI0ZjBmNjk1OTJhNTI4ODAzZWQwOWExNWFjZjUxZGEifX1dLCJwcmVkaWNhdGVUeXBlIjoiaHR0cHM6Ly9zbHNhLmRldi9wcm92ZW5hbmNlL3YxIiwicHJlZGljYXRlIjp7ImJ1aWxkVHlwZSI6Imh0dHBzOi8vd2l0c2VhbC5kZXYvd29ya2Vycy9idWlsZC92MSIsImJ1aWxkZXIiOnsiaWQiOiJodHRwczovL3dpdHNlYWwuZGV2L3dvcmtlcnMvbG9jYWwtYnVpbGQifSwiaW52b2NhdGlvbiI6eyJjb25maWdTb3VyY2UiOnsidXJpIjoiZ2l0K2h0dHBzOi8vd2l0c2VhbC5kZXYvd2l0c2VhbC13b3JrZXJzIiwiZGlnZXN0Ijp7InNoYTEiOiI0NjMyNWRmYzk1MTQ1MGM2MzFlNWRkODVmNGFkMDVhN2RjMzJhMzRkIn19fSwibWV0YWRhdGEiOnsiYnVpbGRJbnZvY2F0aW9uSWQiOiJ3cmFuZ2xlckA0Ljk4LjAiLCJhcnRpZmFjdFR5cGUiOiJnZW5lcmljLWJpbmFyeSJ9fX0=\",\n  \"signatures\": [\n    {\n      \"keyid\": \"witseal-workers-build-attestation-dev\",\n      \"sig\": \"ttlTmxcQgz+l2zfQNECch5+FEiv+r2aI0FpZTkxcOFZ7gssPTExNK8z8jxNnQrJZJXBl+DBaPNMlUzbTRNQUDg==\",\n      \"publicKeyHex\": \"3ccd241cffc9b3618044b97d036d8614593d8b017c340f1dee8773385517654b\",\n      \"_dev_key_warning\": \"DEV attestation key — not for real releases\"\n    }\n  ]\n}\n",
+  builderPublicKeyHex: "3ccd241cffc9b3618044b97d036d8614593d8b017c340f1dee8773385517654b",
 };

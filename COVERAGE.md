@@ -26,6 +26,7 @@ schema, the 17-field canon, the golden vector, or the v0.2 pre-image rule.
 | Receipt schema / version unchanged | Yes — `witseal.receipt.v0.2`, no new version, no schema edit |
 | **Real build provenance (L4) in the receipt** | **Yes — `git_commit` is the real source commit (≠ sentinel zeros); `artifact_digest` = sha256 of the built bundle; `attestation_digest` = sha256 of a DSSE in-toto attestation of that bundle; `build_id` = run id / `wrangler@<ver>`; `artifact_type` = existing `generic-binary`** |
 | DSSE in-toto attestation of the bundle (Ed25519, offline) | Yes — `payloadType=application/vnd.in-toto+json`, SLSA-provenance predicate, signed over the DSSE `PAE`; independently verifies with `crypto.verify` |
+| **Provenance loop is publicly closeable** | **Yes — `GET /attestation` serves the exact DSSE envelope (`sha256` == `attestation_digest`) and `GET /attestation/pubkey` serves the trusted builder key, so a third party closes the loop with the unmodified `witseal verify --check-provenance`** |
 
 ## Build provenance (L4)
 
@@ -43,14 +44,21 @@ value (no new literal).
   bundle, signed with Ed25519 over the DSSE `PAE`, and sets `attestation_digest`
   = `sha256:` of that attestation envelope; `build_id` = `GITHUB_RUN_ID` or
   `wrangler@<version>`. It writes `src/provenance.gen.ts`.
-- `src/provenance.gen.ts` (GENERATED) exports a typed `BUILD_PROVENANCE`.
+- `src/provenance.gen.ts` (GENERATED) exports a typed `BUILD_PROVENANCE` plus
+  `BUILD_ATTESTATION` (the exact DSSE envelope bytes + builder public key). The
+  DSSE statement carries **no** build-host paths, so the published envelope is
+  reproducible and host-path-free.
 - `src/index-receipt-factory.ts` reads `BUILD_PROVENANCE` instead of inline
   sentinels.
+- `src/index.ts` **publishes** the attestation: `GET /attestation` returns the
+  envelope verbatim and `GET /attestation/pubkey` returns the builder key.
 
-**Producing the real provenance is in-build; the attested deploy itself
-(publishing the DSSE attestation alongside the uploaded Worker) is the operator
-action.** The demo signs the attestation with a clearly-labelled DEV-ONLY key
-unless `WITSEAL_ATTESTATION_SEED_HEX` is set.
+The attestation is signed with a clearly-labelled DEV-ONLY key unless
+`WITSEAL_ATTESTATION_SEED_HEX` is set in the build environment. Because the Worker
+now serves both the envelope and the builder key, the build-provenance loop is
+**closed publicly** — a third party re-checks it with the unmodified
+`witseal verify --check-provenance --attestation <…> --builder-key <…>` (see the
+README "Closing the provenance loop" section).
 
 ## What is NOT covered (scope boundary / honesty ceiling)
 
